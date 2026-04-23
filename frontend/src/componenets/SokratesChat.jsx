@@ -1,84 +1,73 @@
-import React, { useEffect } from "react";
+import React from "react";
 
 const SokratesChat = () => {
-  useEffect(() => {
-    // Load the Gradio script dynamically
-    const script = document.createElement("script");
-    script.type = "module";
-    script.src = "https://gradio.s3-us-west-2.amazonaws.com/6.13.0/gradio.js";
-    document.body.appendChild(script);
-
-    return () => {
-      // Cleanup script on unmount if necessary
-      document.body.removeChild(script);
-    };
-  }, []);
-
   return (
-    <div className="chat-wrapper-container">
-      <div className="chat-header">
-        <span className="chat-icon">🏛️</span>
-        <h2>Sokrates Philosophy AI</h2>
+    <div className="chat-full-container">
+      {/* Mini Header to keep the brand visible without taking much space */}
+      <div className="chat-mini-header">
+        <div className="brand-group">
+          <span className="brand-emoji">🏛️</span>
+          <div>
+            <div className="brand-name">Sokrates</div>
+            <div className="brand-sub">Philosophy AI</div>
+          </div>
+        </div>
+        <div className="status-indicator">
+          <span className="dot"></span> Sanctuary Mode
+        </div>
       </div>
-      
-      <div className="gradio-frame">
-        <gradio-app
-          src="https://niloy64-sokrates.hf.space"
-          theme_mode="dark"
-          show_footer="false"
-          container="false"
-        ></gradio-app>
+
+      <div className="iframe-wrapper">
+        <iframe
+          src="https://niloy64-sokrates.hf.space/?__theme=dark"
+          frameBorder="0"
+          width="100%"
+          height="100%"
+          title="Sokrates AI"
+          allow="accelerometer; ambient-light-sensor; microphone; camera; clipboard-read; clipboard-write"
+        ></iframe>
       </div>
 
       <style dangerouslySetInnerHTML={{ __html: `
-        .chat-wrapper-container {
-          width: 100%;
-          height: 100%;
+        /* Remove padding from the parent to ensure full width */
+        .chat-full-container {
+          width: 100vw;
+          height: calc(100vh - 70px); /* Adjust based on your App header height */
           display: flex;
           flex-direction: column;
-          align-items: center;
-          padding: 20px;
-          animation: fadeIn 0.8s ease-out;
+          background: #222425;
+          position: fixed;
+          top: 70px; /* Shifts it below your App.jsx main header */
+          left: 0;
+          z-index: 100;
         }
 
-        .chat-header {
+        .chat-mini-header {
           display: flex;
           align-items: center;
-          gap: 12px;
-          margin-bottom: 20px;
+          justify-content: space-between;
+          padding: 10px 24px;
+          background: #1a1b1c;
+          border-bottom: 1px solid #333;
         }
 
-        .chat-header h2 {
-          font-family: var(--font-display);
-          color: var(--text-primary);
-          font-size: 28px;
-          margin: 0;
-        }
+        .brand-group { display: flex; align-items: center; gap: 12px; }
+        .brand-emoji { font-size: 24px; }
+        .brand-name { font-family: serif; color: #fdf6ee; font-weight: bold; }
+        .brand-sub { font-size: 10px; color: #8ba88e; text-transform: uppercase; letter-spacing: 1px; }
 
-        .gradio-frame {
+        .status-indicator { color: #8ba88e; font-size: 12px; display: flex; align-items: center; gap: 6px; }
+        .dot { width: 8px; height: 8px; background: #8ba88e; border-radius: 50%; display: inline-block; box-shadow: 0 0 8px #8ba88e; }
+
+        .iframe-wrapper {
+          flex: 1; /* Takes all remaining height */
           width: 100%;
-          max-width: 1000px;
-          height: 80vh;
-          box-shadow: var(--shadow-cozy);
-          border-radius: var(--radius-lg);
-          background: #222425; /* Keep dark for the philosophy vibe */
-          border: 4px solid var(--surface);
-          overflow: hidden;
+          border: none;
         }
 
-        gradio-app {
-          --text-sm: 16px !important;
-          --text-md: 18px !important;
-          --text-lg: 22px !important;
-          --input-text-size: 18px !important;
-          --button-large-text-size: 18px !important;
-          --primary-500: #8ba88e !important; /* Changed to your Sage color */
-          border-radius: 20px !important;
-        }
-
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateY(10px); }
-          to { opacity: 1; transform: translateY(0); }
+        /* Ensure the Gradio app inside the iframe feels integrated */
+        iframe {
+          background-color: #222425;
         }
       `}} />
     </div>
