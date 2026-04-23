@@ -147,6 +147,7 @@ export default function App() {
     }
     return () => clearInterval(timer);
   }, [appMode]);
+  
 
   return (
     <div className="yoga-app" style={{ background: "#fdf6ee" }}>

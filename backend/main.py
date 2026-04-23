@@ -329,15 +329,10 @@ async def yoga_ws(ws: WebSocket):
                 s["state"]       = "adjusting"
                 s["still_count"] = 0
 
-            s["live_score"] = 0.0
-            s["live_feedback"] = []
-
             if curr_kpts is not None:
                 s["prev_kpts"] = curr_kpts
                 norm = normalize_kpts(curr_kpts)
                 live_score, live_feedback = compute_accuracy(ref_kpts, norm)
-                s["live_score"] = live_score
-                s["live_feedback"] = live_feedback
 
             # Encode annotated frame as JPEG → base64
             _, buf = cv2.imencode(".jpg", display, [cv2.IMWRITE_JPEG_QUALITY, 70])
@@ -348,8 +343,8 @@ async def yoga_ws(ws: WebSocket):
                 "frame":        frame_out,
                 "state":        s["state"],
                 "hold_progress": min(s["still_count"] / STABILITY_FRAMES, 1.0),
-                "score":        s["live_score"],
-                "feedback":     s["live_feedback"][:4],
+                "score":        s["locked_score"],
+                "feedback":     s["locked_feedback"][:4],
                 "session":      _session_summary(s),
             }
             await ws.send_text(json.dumps(payload))
