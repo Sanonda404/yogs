@@ -8,6 +8,7 @@ import base64
 import json
 import os
 import uvicorn
+import time
 
 import cv2
 import mediapipe as mp
@@ -206,53 +207,72 @@ def get_poses():
 
 # ── WebSocket: frame processing ───────────────────────────────────────────────
 # 1. Add a frame counter outside the function or in session
-frame_counter = 0
+
+FPS_LIMIT = 10
+FRAME_INTERVAL = 1.0 / FPS_LIMIT
+INFERENCE_SKIP = 3   # run inference every 3 frames
 
 @app.websocket("/ws/yoga")
 async def yoga_ws(ws: WebSocket):
     await ws.accept()
     session = make_session()
 
+    last_time = 0
+    frame_count = 0
+    last_payload = None
+
     try:
         while True:
+            # 🔥 FPS throttling
+            now = time.time()
+            if now - last_time < FRAME_INTERVAL:
+                await asyncio.sleep(0.001)
+                continue
+            last_time = now
+
             raw = await ws.receive_text()
             msg = json.loads(raw)
             action = msg.get("action", "frame")
 
-            # ── Client sends retry / next-level / select-pose commands ──────────
+            # ───────── CONTROL ACTIONS ─────────
             if action == "retry":
-                session["state"]        = "adjusting"
-                session["still_count"]  = 0
-                session["level_passed"] = False
-                session["smooth_kpts"]  = None
+                session.update({
+                    "state": "adjusting",
+                    "still_count": 0,
+                    "level_passed": False,
+                    "smooth_kpts": None
+                })
                 await ws.send_text(json.dumps({"type": "session", "session": _session_summary(session)}))
                 continue
 
             if action == "next_level":
                 if session["current_level"] < len(POSE_NAMES) - 1:
                     session["current_level"] += 1
-                session["state"]        = "adjusting"
-                session["still_count"]  = 0
-                session["level_passed"] = False
-                session["smooth_kpts"]  = None
-                session["selected_pose"] = None
+                session.update({
+                    "state": "adjusting",
+                    "still_count": 0,
+                    "level_passed": False,
+                    "smooth_kpts": None,
+                    "selected_pose": None
+                })
                 await ws.send_text(json.dumps({"type": "session", "session": _session_summary(session)}))
                 continue
 
             if action == "select_pose":
                 chosen = msg.get("pose")
-                if chosen and chosen in POSE_LIBRARY:
-                    session["selected_pose"] = chosen
-                    session["state"]         = "adjusting"
-                    session["still_count"]   = 0
-                    session["level_passed"]  = False
-                    session["smooth_kpts"]   = None
+                if chosen in POSE_LIBRARY:
+                    session.update({
+                        "selected_pose": chosen,
+                        "state": "adjusting",
+                        "still_count": 0,
+                        "level_passed": False,
+                        "smooth_kpts": None
+                    })
                 await ws.send_text(json.dumps({"type": "session", "session": _session_summary(session)}))
                 continue
 
-            # ── Normal frame processing ───────────────────────────────────────
+            # ───────── FRAME PROCESSING ─────────
             frame_b64 = msg.get("frame")
-            # Resolve which pose to use: user selection → level default
             pose_name = (
                 session["selected_pose"]
                 or msg.get("pose")
@@ -262,99 +282,105 @@ async def yoga_ws(ws: WebSocket):
             if not frame_b64 or pose_name not in POSE_LIBRARY:
                 continue
 
-            # Decode JPEG from browser
+            # Decode
             img_bytes = base64.b64decode(frame_b64)
-            np_arr    = np.frombuffer(img_bytes, np.uint8)
-            frame     = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+            np_arr = np.frombuffer(img_bytes, np.uint8)
+            frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
             if frame is None:
                 continue
 
             frame = cv2.flip(frame, 1)
 
-            # Downscale for inference
-            small = cv2.resize(frame, (PROC_W, PROC_H), interpolation=cv2.INTER_AREA)
-            rgb   = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
+            # 🔥 smaller resolution
+            small = cv2.resize(frame, (256, 144))
+            rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
             mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
 
-            result    = await asyncio.get_event_loop().run_in_executor(
-                None, LANDMARKER.detect, mp_img
-            )
+            frame_count += 1
+            run_inference = (frame_count % INFERENCE_SKIP == 0)
 
-            ref_kpts  = POSE_LIBRARY[pose_name]
-            s         = session
             curr_kpts = None
 
-            if result.pose_landmarks:
-                landmarks = result.pose_landmarks[0]
-                draw_skeleton(small, landmarks)
-                raw_kpts  = np.array([[lm.x, lm.y, lm.visibility] for lm in landmarks])
-                # ── EMA smooth: removes air-trembles / sensor jitter ──────────
-                curr_kpts         = smooth_landmarks(s["smooth_kpts"], raw_kpts)
-                s["smooth_kpts"]  = curr_kpts
+            if run_inference:
+                result = await asyncio.get_event_loop().run_in_executor(
+                    None, LANDMARKER.detect, mp_img
+                )
 
-            # Upscale back
-            display = cv2.resize(small, (frame.shape[1], frame.shape[0]),
-                                 interpolation=cv2.INTER_LINEAR)
+                if result.pose_landmarks:
+                    landmarks = result.pose_landmarks[0]
+                    draw_skeleton(small, landmarks)
 
-            # ── Stability machine (operates on smoothed keypoints) ────────────
-            prev = s["prev_kpts"]
+                    raw_kpts = np.array([[lm.x, lm.y, lm.visibility] for lm in landmarks])
+                    curr_kpts = smooth_landmarks(session["smooth_kpts"], raw_kpts)
+                    session["smooth_kpts"] = curr_kpts
+
+            else:
+                curr_kpts = session["smooth_kpts"]
+
+            # ───────── STATE MACHINE ─────────
+            prev = session["prev_kpts"]
+
             if curr_kpts is not None and prev is not None:
                 movement = landmark_movement(prev, curr_kpts)
 
-                if s["state"] == "adjusting":
+                if session["state"] == "adjusting":
                     if movement < STABILITY_THRESH:
-                        s["still_count"] += 1
-                        s["state"] = "holding"
-                        if s["still_count"] >= STABILITY_FRAMES:
-                            _lock(s, ref_kpts, curr_kpts)
+                        session["still_count"] += 1
+                        session["state"] = "holding"
                     else:
-                        s["still_count"] = 0
+                        session["still_count"] = 0
 
-                elif s["state"] == "holding":
+                elif session["state"] == "holding":
                     if movement < STABILITY_THRESH:
-                        s["still_count"] += 1
-                        if s["still_count"] >= STABILITY_FRAMES:
-                            _lock(s, ref_kpts, curr_kpts)
+                        session["still_count"] += 1
+                        if session["still_count"] >= STABILITY_FRAMES:
+                            _lock(session, POSE_LIBRARY[pose_name], curr_kpts)
                     else:
-                        # Gradual decay — don't reset instantly on a single noisy frame
-                        s["still_count"] = max(0, s["still_count"] - 2)
-                        if s["still_count"] == 0:
-                            s["state"] = "adjusting"
+                        session["still_count"] = max(0, session["still_count"] - 2)
 
-                elif s["state"] == "locked":
+                elif session["state"] == "locked":
                     if movement > RESET_THRESH:
-                        s["state"]        = "adjusting"
-                        s["still_count"]  = 0
-                        s["level_passed"] = False
-                        s["smooth_kpts"]  = None   # reset smoother on intentional move
+                        session.update({
+                            "state": "adjusting",
+                            "still_count": 0,
+                            "level_passed": False,
+                            "smooth_kpts": None
+                        })
 
-            elif curr_kpts is None and s["state"] != "locked":
-                s["state"]       = "adjusting"
-                s["still_count"] = 0
+            elif curr_kpts is None and session["state"] != "locked":
+                session["state"] = "adjusting"
+                session["still_count"] = 0
 
-            s["live_score"] = 0.0
-            s["live_feedback"] = []
-
+            # ───────── SCORE (only when needed) ─────────
             if curr_kpts is not None:
-                s["prev_kpts"] = curr_kpts
-                norm = normalize_kpts(curr_kpts)
-                live_score, live_feedback = compute_accuracy(ref_kpts, norm)
-                s["live_score"] = live_score
-                s["live_feedback"] = live_feedback
+                session["prev_kpts"] = curr_kpts
 
-            # Encode annotated frame as JPEG → base64
-            _, buf = cv2.imencode(".jpg", display, [cv2.IMWRITE_JPEG_QUALITY, 70])
-            frame_out = base64.b64encode(buf).decode()
+                if run_inference:  # 🔥 compute less often
+                    norm = normalize_kpts(curr_kpts)
+                    score, feedback = compute_accuracy(POSE_LIBRARY[pose_name], norm)
+                    session["live_score"] = score
+                    session["live_feedback"] = feedback
+
+            # ───────── ENCODE FRAME (LESS OFTEN) ─────────
+            send_frame = (frame_count % 2 == 0)
+
+            frame_out = None
+            if send_frame:
+                display = cv2.resize(small, (frame.shape[1], frame.shape[0]))
+                _, buf = cv2.imencode(".jpg", display, [cv2.IMWRITE_JPEG_QUALITY, 50])
+                frame_out = base64.b64encode(buf).decode()
 
             payload = {
-                "type":         "frame",
-                "frame":        frame_out,
-                "state":        s["state"],
-                "hold_progress": min(s["still_count"] / STABILITY_FRAMES, 1.0),
-                "score":        s["live_score"],
-                "feedback":     s["live_feedback"][:4],
-                "session":      _session_summary(s),
+                "type": "frame",
+                "frame": frame_out,  # may be None
+                "state": session["state"],
+                "hold_progress": min(session["still_count"] / STABILITY_FRAMES, 1.0),
+                "score": session.get("live_score", 0),
+                "feedback": session.get("live_feedback", [])[:4],
+                "session": _session_summary(session),
             }
+
+            last_payload = payload
             await ws.send_text(json.dumps(payload))
 
     except WebSocketDisconnect:
