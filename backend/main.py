@@ -112,10 +112,45 @@ if not POSE_NAMES:
 
 # ── Math helpers ──────────────────────────────────────────────────────────────
 def calc_angle(a, b, c):
-    a, b, c = np.array(a), np.array(b), np.array(c)
-    ba, bc  = a - b, c - b
-    cos     = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc) + 1e-6)
-    return float(np.degrees(np.arccos(np.clip(cos, -1.0, 1.0))))
+    """
+    Calculates the angle at joint 'b' given points a, b, and c.
+    Works consistently across both 2D and 3D coordinate systems.
+    """
+    a = np.array(a) # First point (e.g., Shoulder)
+    b = np.array(b) # Mid point (e.g., Elbow)
+    c = np.array(c) # End point (e.g., Wrist)
+    
+    # Create vectors
+    ba = a - b
+    bc = c - b
+    
+    # Calculate cosine using dot product
+    cosine_angle = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc) + 1e-6)
+    angle = np.arccos(np.clip(cosine_angle, -1.0, 1.0))
+    
+    return np.degrees(angle)
+
+def get_normalized_landmarks(landmarks):
+    """
+    Normalizes landmarks so that the person's size/distance 
+    from the camera doesn't affect the accuracy score.
+    """
+    # landmarks should be a numpy array of [x, y, visibility]
+    kpts = landmarks.copy()
+    
+    # Use the midpoint of the hips as the origin (0,0)
+    hip_center = (kpts[23, :2] + kpts[24, :2]) / 2
+    kpts[:, :2] -= hip_center
+    
+    # Scale by torso length (distance between shoulder and hip)
+    # This ensures a person far away has the same 'scale' as someone close
+    shoulder_center = (kpts[11, :2] + kpts[12, :2]) / 2
+    torso_size = np.linalg.norm(shoulder_center - hip_center)
+    
+    if torso_size > 0:
+        kpts[:, :2] /= torso_size
+        
+    return kpts
 
 def normalize_kpts(kpts):
     hip   = (kpts[23, :2] + kpts[24, :2]) / 2
@@ -131,22 +166,35 @@ def is_visible(kpts, a, b, c, thr=0.4):
 
 def compute_accuracy(ref, user, tol=15):
     scores, tips = [], []
+    
     for joint, (a, b, c) in JOINT_ANGLES.items():
+        # Check visibility for all three landmarks in the joint
         if not is_visible(ref, a, b, c):
             continue
+            
         if not is_visible(user, a, b, c):
+            # Instead of skipping, we add a 0 to the list to avoid empty lists
             scores.append(0.0)
             tips.append(f"{joint}: not detected — show full body")
             continue
+            
         ref_ang  = calc_angle(ref[a,:2],  ref[b,:2],  ref[c,:2])
         user_ang = calc_angle(user[a,:2], user[b,:2], user[c,:2])
-        diff     = abs(ref_ang - user_ang)
-        score    = 100.0 if diff <= tol else max(0.0, 100.0 - (diff - tol) * 2.5)
+        
+        diff = abs(ref_ang - user_ang)
+        # Calculate score: 100 if perfect, decreasing as diff increases
+        score = 100.0 if diff <= tol else max(0.0, 100.0 - (diff - tol) * 2.5)
         scores.append(score)
+        
         if score < 60:
             hint = "bend more" if user_ang < ref_ang else "straighten"
             tips.append(f"{joint}: {hint} ({diff:.0f}° off)")
-    overall = float(np.mean(scores)) if scores else 0.0
+
+    # FIX: Ensure we aren't passing an empty list or a non-iterable to np.mean
+    if len(scores) == 0:
+        return 0.0, ["No joints detected. Stand back!"]
+        
+    overall = float(np.mean(scores)) 
     return overall, tips
 
 def landmark_movement(prev, curr):
