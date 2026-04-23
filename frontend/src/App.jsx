@@ -1,10 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import api, { WS_URL, REST_URL } from "./api"; // Import your new helpers
 import "./index.css";
 
 // ── Config ────────────────────────────────────────────────────────────────────
-const WS_URL   = "ws://localhost:5000/ws/yoga";
-const REST_URL = "http://localhost:5000/poses";
-const FPS      = 12;
+const FPS = 12;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -28,29 +27,15 @@ function SukhasanaIllustration() {
         fill="none"
         xmlns="http://www.w3.org/2000/svg"
       >
-        {/* Glow halo */}
-        <circle cx="60" cy="22" r="22" stroke="#e8b86d" strokeWidth="1.5"
-          strokeDasharray="4 3" opacity="0.5"/>
-        {/* Head */}
+        <circle cx="60" cy="22" r="22" stroke="#e8b86d" strokeWidth="1.5" strokeDasharray="4 3" opacity="0.5"/>
         <circle cx="60" cy="22" r="13" fill="#d4a06a"/>
-        {/* Body */}
         <ellipse cx="60" cy="72" rx="17" ry="25" fill="#c98e56"/>
-        {/* Left arm */}
-        <path d="M44 62 Q24 72 18 86" stroke="#c98e56" strokeWidth="8"
-          strokeLinecap="round"/>
-        {/* Right arm */}
-        <path d="M76 62 Q96 72 102 86" stroke="#c98e56" strokeWidth="8"
-          strokeLinecap="round"/>
-        {/* Left hand */}
+        <path d="M44 62 Q24 72 18 86" stroke="#c98e56" strokeWidth="8" strokeLinecap="round"/>
+        <path d="M76 62 Q96 72 102 86" stroke="#c98e56" strokeWidth="8" strokeLinecap="round"/>
         <circle cx="17" cy="89" r="6" fill="#d4a06a"/>
-        {/* Right hand */}
         <circle cx="103" cy="89" r="6" fill="#d4a06a"/>
-        {/* Left leg (crossed) */}
-        <path d="M44 94 Q30 112 24 132 Q42 140 60 138"
-          stroke="#c98e56" strokeWidth="9" strokeLinecap="round" fill="none"/>
-        {/* Right leg (crossed) */}
-        <path d="M76 94 Q90 112 96 132 Q78 140 60 138"
-          stroke="#c98e56" strokeWidth="9" strokeLinecap="round" fill="none"/>
+        <path d="M44 94 Q30 112 24 132 Q42 140 60 138" stroke="#c98e56" strokeWidth="9" strokeLinecap="round" fill="none"/>
+        <path d="M76 94 Q90 112 96 132 Q78 140 60 138" stroke="#c98e56" strokeWidth="9" strokeLinecap="round" fill="none"/>
       </svg>
       <span style={{ fontSize:11, color:"var(--text-muted)", fontStyle:"italic" }}>
         Sukhasana — Easy Pose
@@ -69,8 +54,7 @@ function AccuracyRing({ score, size = 120 }) {
     score >= 60 ? "var(--amber)" : "var(--terra)";
   return (
     <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
-      <circle cx={size/2} cy={size/2} r={r} fill="none"
-        stroke="var(--bg-deep)" strokeWidth={9}/>
+      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="var(--bg-deep)" strokeWidth={9}/>
       <circle
         cx={size/2} cy={size/2} r={r} fill="none"
         stroke={color} strokeWidth={9}
@@ -83,10 +67,7 @@ function AccuracyRing({ score, size = 120 }) {
         className="ring-score-text"
         textAnchor="middle" dominantBaseline="central"
         fill={color} fontSize={size * 0.2} fontWeight="700"
-        style={{
-          transform: `rotate(90deg)`,
-          transformOrigin: `${size/2}px ${size/2}px`,
-        }}
+        style={{ transform: `rotate(90deg)`, transformOrigin: `${size/2}px ${size/2}px` }}
       >
         {score.toFixed(0)}%
       </text>
@@ -94,22 +75,17 @@ function AccuracyRing({ score, size = 120 }) {
   );
 }
 
-// ── Hold Bar ──────────────────────────────────────────────────────────────────
 function HoldBar({ progress }) {
   return (
     <div className="hold-bar-wrap">
-      <div className="hold-bar-label">
-        Stability — {Math.round(clamp(progress, 0, 1) * 100)}%
-      </div>
+      <div className="hold-bar-label">Stability — {Math.round(clamp(progress, 0, 1) * 100)}%</div>
       <div className="hold-bar-track">
-        <div className="hold-bar-fill"
-          style={{ width: `${clamp(progress * 100, 0, 100)}%` }}/>
+        <div className="hold-bar-fill" style={{ width: `${clamp(progress * 100, 0, 100)}%` }}/>
       </div>
     </div>
   );
 }
 
-// ── Badge ─────────────────────────────────────────────────────────────────────
 function Badge({ points, passed }) {
   if (!passed) return <span className="badge badge-fail">Need 80% to pass</span>;
   if (points >= 100) return <span className="badge badge-perfect">⭐ Perfect</span>;
@@ -118,7 +94,7 @@ function Badge({ points, passed }) {
   return <span className="badge badge-passed">✅ Passed</span>;
 }
 
-// ── Main ──────────────────────────────────────────────────────────────────────
+// ── Main App Component ────────────────────────────────────────────────────────
 export default function App() {
   const videoRef    = useRef(null);
   const canvasRef   = useRef(null);
@@ -144,22 +120,26 @@ export default function App() {
   const [justPassed, setJustPassed]       = useState(false);
   const [pointsEarned, setPointsEarned]   = useState(0);
   const [confetti, setConfetti]           = useState([]);
-  const [selectedPose, setSelectedPose]   = useState(""); // user-chosen pose
+  const [selectedPose, setSelectedPose]   = useState("");
 
-  // ── REST ─────────────────────────────────────────────────────────────────────
+  // ── LOAD POSES (Using Axios via api.js) ────────────────────────────────────
   useEffect(() => {
-    fetch(REST_URL)
-      .then(r => r.json())
-      .then(data => {
+    const fetchPoses = async () => {
+      try {
+        const response = await api.get("/poses");
+        const data = response.data;
         setPoses(data.poses.map(p => p.name));
         const imgs = {};
         data.poses.forEach(p => { if (p.ref_image) imgs[p.name] = p.ref_image; });
         setRefImages(imgs);
-      })
-      .catch(() => {});
+      } catch (err) {
+        console.error("Failed to load poses:", err);
+      }
+    };
+    fetchPoses();
   }, []);
 
-  // ── WebSocket ─────────────────────────────────────────────────────────────────
+  // ── WebSocket ───────────────────────────────────────────────────────────────
   useEffect(() => {
     const ws = new WebSocket(WS_URL);
     wsRef.current = ws;
@@ -168,7 +148,6 @@ export default function App() {
 
     ws.onmessage = (e) => {
       const msg = JSON.parse(e.data);
-
       if (msg.type === "frame") {
         setServerFrame(`data:image/jpeg;base64,${msg.frame}`);
         setGameState(msg.state);
@@ -189,7 +168,6 @@ export default function App() {
         }
         if (msg.session) setSession(msg.session);
       }
-
       if (msg.type === "session") {
         setSession(msg.session);
         if (msg.session?.selected_pose) setSelectedPose(msg.session.selected_pose);
@@ -199,11 +177,10 @@ export default function App() {
         prevPassRef.current = false;
       }
     };
-
     return () => ws.close();
   }, []);
 
-  // ── Camera ────────────────────────────────────────────────────────────────────
+  // ── Camera & Loop ───────────────────────────────────────────────────────────
   const startCamera = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -215,7 +192,7 @@ export default function App() {
         videoRef.current.play();
         setCamReady(true);
       }
-    } catch (err) { alert("Camera access denied: " + err.message); }
+    } catch (err) { console.error("Camera error:", err); }
   }, []);
 
   useEffect(() => {
@@ -226,10 +203,8 @@ export default function App() {
     };
   }, [startCamera]);
 
-  // ── Frame loop ────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!camReady || !wsReady) return;
-    clearInterval(intervalRef.current);
     intervalRef.current = setInterval(() => {
       const video  = videoRef.current;
       const canvas = canvasRef.current;
@@ -244,7 +219,7 @@ export default function App() {
     return () => clearInterval(intervalRef.current);
   }, [camReady, wsReady]);
 
-  // ── WS actions ──────────────────────────────────────────────────────────────
+  // ── UI Actions ──────────────────────────────────────────────────────────────
   const sendAction = (action) => {
     if (wsRef.current?.readyState === WebSocket.OPEN)
       wsRef.current.send(JSON.stringify({ action }));
@@ -260,62 +235,39 @@ export default function App() {
     setConfetti([]);
   };
 
-  // initialise selectedPose once poses are loaded
   useEffect(() => {
-    if (poses.length > 0 && !selectedPose) {
-      setSelectedPose(poses[0]);
-    }
-  }, [poses]); // eslint-disable-line
+    if (poses.length > 0 && !selectedPose) setSelectedPose(poses[0]);
+  }, [poses, selectedPose]);
 
-  // ── Confetti ──────────────────────────────────────────────────────────────────
   const spawnConfetti = () => {
     const colors = ["#7aaa7e","#d4820a","#c1623f","#6ba3be","#c9940a","#a78b6a","#e8cc80"];
     const items  = Array.from({ length: 34 }, (_, i) => ({
-      id: i, x: Math.random() * 100,
-      color: colors[i % colors.length],
-      size: 5 + Math.random() * 9,
-      delay: Math.random() * 0.7,
-      spin:  Math.random() * 360,
-      dur:   2.8 + Math.random() * 1.2,
+      id: i, x: Math.random() * 100, color: colors[i % colors.length],
+      size: 5 + Math.random() * 9, delay: Math.random() * 0.7,
+      spin: Math.random() * 360, dur: 2.8 + Math.random() * 1.2,
     }));
     setConfetti(items);
     setTimeout(() => setConfetti([]), 4400);
   };
 
-  // ── Derived ───────────────────────────────────────────────────────────────────
+  // ── Derived State ────────────────────────────────────────────────────────────
   const currentPose = selectedPose || session.pose_name || poses[0] || "Sukhasana";
   const refImg      = refImages[currentPose];
-  const isLevel0    = session.current_level === 0;
+  const statusClass = gameState === "holding" ? "holding" : (gameState === "locked" && score >= 80 ? "locked-pass" : (gameState === "locked" ? "locked-fail" : "adjusting"));
+  const statusText  = gameState === "adjusting" ? "🌿 Get into position & hold still…" : (gameState === "holding" ? "🌀 Hold it — locking your pose…" : (score >= 80 ? "✨ Perfect!" : `🌱 ${score.toFixed(0)}% accuracy — need 80% to pass`));
 
-  const statusClass =
-    gameState === "holding"                 ? "holding"     :
-    gameState === "locked" && score >= 80   ? "locked-pass" :
-    gameState === "locked"                  ? "locked-fail" : "adjusting";
-
-  const statusText =
-    gameState === "adjusting" ? "🌿 Get into position & hold still…" :
-    gameState === "holding"   ? "🌀 Hold it — locking your pose…"    :
-    score >= 80               ? `✨ ${score >= 95 ? "Perfect!" : score >= 85 ? "Excellent!" : "Passed!"}` :
-                                `🌱 ${score.toFixed(0)}% accuracy — need 80% to pass`;
-
-  // ── Render ────────────────────────────────────────────────────────────────────
   return (
     <div className="yoga-app">
       <canvas ref={canvasRef} style={{ display:"none" }} />
       <video  ref={videoRef}  style={{ display:"none" }} muted playsInline />
 
-      {/* Confetti */}
       {confetti.map(c => (
         <div key={c.id} className="confetti-piece" style={{
-          left: `${c.x}%`, width: c.size, height: c.size,
-          background: c.color,
-          animationDuration: `${c.dur}s`,
-          animationDelay: `${c.delay}s`,
-          transform: `rotate(${c.spin}deg)`,
+          left: `${c.x}%`, width: c.size, height: c.size, background: c.color,
+          animationDuration: `${c.dur}s`, animationDelay: `${c.delay}s`, transform: `rotate(${c.spin}deg)`,
         }}/>
       ))}
 
-      {/* ── Header ─────────────────────────────────────────────────────────── */}
       <header className="header">
         <div className="header-brand">
           <span className="header-lotus">🪷</span>
@@ -325,176 +277,72 @@ export default function App() {
           </div>
         </div>
         <div className="header-right">
-          <div className="pts-chip">
-            <span className="pts-icon">✨</span>
-            <span className="pts-value">{session.total_points}</span>
-            <span className="pts-label">pts</span>
-          </div>
-          <div className={`status-chip ${wsReady ? "live" : "offline"}`}>
-            <span className={`status-dot ${wsReady ? "live" : "offline"}`}/>
-            {wsReady ? "Live" : "Offline"}
-          </div>
+          <div className="pts-chip"><span className="pts-icon">✨</span><span className="pts-value">{session.total_points}</span><span className="pts-label">pts</span></div>
+          <div className={`status-chip ${wsReady ? "live" : "offline"}`}><span className={`status-dot ${wsReady ? "live" : "offline"}`}/>{wsReady ? "Live" : "Offline"}</div>
         </div>
       </header>
 
-      {/* ── Level strip ─────────────────────────────────────────────────────── */}
       <div className="level-strip">
-        <span className="level-label">
-          Level {session.current_level + 1} / {session.total_levels || poses.length}
-        </span>
+        <span className="level-label">Level {session.current_level + 1} / {session.total_levels || poses.length}</span>
         <div className="level-dots">
           {poses.map((_, i) => (
-            <div key={i} className={`level-dot ${
-              i < session.current_level   ? "done"    :
-              i === session.current_level ? "current" : "future"
-            }`}/>
+            <div key={i} className={`level-dot ${i < session.current_level ? "done" : (i === session.current_level ? "current" : "future")}`}/>
           ))}
         </div>
         <span className="level-pose-name">{currentPose}</span>
       </div>
 
-      {/* ── Main grid ───────────────────────────────────────────────────────── */}
       <div className="main-grid">
-
-        {/* Left — Reference pose */}
         <div className="panel">
           <div className="panel-title">Choose Your Pose</div>
-
-          {/* Pose dropdown */}
           <div className="pose-select-wrap">
             <span className="pose-select-icon">🧘</span>
-            <select
-              className="pose-select"
-              value={selectedPose}
-              onChange={e => sendSelectPose(e.target.value)}
-            >
-              {poses.length === 0 && (
-                <option value="">Loading poses…</option>
-              )}
-              {poses.map(p => (
-                <option key={p} value={p}>{p}</option>
-              ))}
+            <select className="pose-select" value={selectedPose} onChange={e => sendSelectPose(e.target.value)}>
+              {poses.length === 0 && <option value="">Loading poses…</option>}
+              {poses.map(p => <option key={p} value={p}>{p}</option>)}
             </select>
             <span className="pose-select-arrow">▾</span>
           </div>
 
           {refImg ? (
             <div className="ref-img-wrap">
-              <img className="ref-img"
-                src={`data:image/jpeg;base64,${refImg}`}
-                alt={currentPose}/>
+              <img className="ref-img" src={`data:image/jpeg;base64,${refImg}`} alt={currentPose}/>
               <span className="ref-img-badge">{currentPose}</span>
             </div>
-          ) : isLevel0 ? (
-            <SukhasanaIllustration />
-          ) : (
-            <div className="ref-img-placeholder">
-              <span style={{ fontSize:36 }}>🧘</span>
-              <span>No image available</span>
-            </div>
-          )}
+          ) : (session.current_level === 0 ? <SukhasanaIllustration /> : <div className="ref-img-placeholder"><span>🧘</span><span>No image</span></div>)}
 
           <div className="pose-name">{currentPose}</div>
           <div className={`pose-status ${statusClass}`}>{statusText}</div>
-
           {gameState === "holding" && <HoldBar progress={holdProgress}/>}
-
-          {gameState === "locked" && feedback.length > 0 && (
-            <div className="feedback-box">
-              {feedback.map((tip, i) => (
-                <div key={i} className="feedback-item">⚠ {tip}</div>
-              ))}
-            </div>
-          )}
+          {gameState === "locked" && feedback.map((tip, i) => <div key={i} className="feedback-item">⚠ {tip}</div>)}
         </div>
 
-        {/* Centre — Live feed */}
         <div className="feed-panel">
           <div className="panel-title">Live Camera</div>
           <div className="feed-outer">
-            {serverFrame ? (
-              <img className="feed-img" src={serverFrame} alt="live feed"/>
-            ) : (
-              <div className="feed-placeholder">
-                <span className="feed-placeholder-icon">📷</span>
-                <span className="feed-placeholder-text">
-                  {wsReady ? "Waiting for camera…" : "Connecting to server…"}
-                </span>
-              </div>
-            )}
-            {gameState === "locked" && (
-              <div className="ring-overlay">
-                <AccuracyRing score={score} size={108}/>
-              </div>
-            )}
+            {serverFrame ? <img className="feed-img" src={serverFrame} alt="live feed"/> : <div className="feed-placeholder">📷 Waiting...</div>}
+            {gameState === "locked" && <div className="ring-overlay"><AccuracyRing score={score} size={108}/></div>}
           </div>
         </div>
 
-        {/* Right — Score & actions */}
         <div className="panel">
           <div className="panel-title">Your Score</div>
-
           {gameState === "locked" ? (
             <>
-              <div className="ring-center">
-                <AccuracyRing score={score} size={148}/>
-              </div>
-              <div className="badge-row">
-                <Badge points={pointsEarned} passed={session.level_passed}/>
-              </div>
-              {session.level_passed && (
-                <div className="pts-earned">+{pointsEarned} pts earned</div>
-              )}
+              <div className="ring-center"><AccuracyRing score={score} size={148}/></div>
+              <Badge points={pointsEarned} passed={session.level_passed}/>
               <div className="action-btns">
-                <button className="btn-secondary" onClick={() => sendAction("retry")}>
-                  🔁 Retry Pose
-                </button>
-                {session.level_passed &&
-                  session.current_level < session.total_levels - 1 && (
-                  <button className="btn-primary" onClick={() => sendAction("next_level")}>
-                    Next Level →
-                  </button>
-                )}
-                {session.current_level >= session.total_levels - 1 &&
-                  session.level_passed && (
-                  <div className="all-done">
-                    🎉 All levels complete!<br/>
-                    Total: <strong>{session.total_points} pts</strong>
-                  </div>
+                <button className="btn-secondary" onClick={() => sendAction("retry")}>🔁 Retry</button>
+                {session.level_passed && session.current_level < (session.total_levels - 1) && (
+                  <button className="btn-primary" onClick={() => sendAction("next_level")}>Next →</button>
                 )}
               </div>
             </>
-          ) : (
-            <div className="waiting-score">
-              <span className={`waiting-icon ${gameState === "holding" ? "pulsing" : ""}`}>
-                {gameState === "holding" ? "⏳" : "🧘"}
-              </span>
-              <span className="waiting-text">
-                {gameState === "holding"
-                  ? "Almost there — hold still…"
-                  : "Strike the pose to get your score"}
-              </span>
-            </div>
-          )}
-
-          <div className="pts-summary">
-            <div className="pts-summary-label">Total Points</div>
-            <div className="pts-summary-value">{session.total_points}</div>
-            <div className="pts-summary-sub">
-              Level {session.current_level + 1} of {session.total_levels || poses.length}
-            </div>
-          </div>
+          ) : <div className="waiting-score">🧘 Strike a pose</div>}
         </div>
       </div>
 
-      {/* ── Pass banner ─────────────────────────────────────────────────────── */}
-      {justPassed && (
-        <div className="pass-banner" onClick={() => setJustPassed(false)}>
-          <span>🏆</span>
-          <span>Level Passed! +{pointsEarned} points</span>
-          <span>🎉</span>
-        </div>
-      )}
+      {justPassed && <div className="pass-banner">🏆 Level Passed! +{pointsEarned} pts 🎉</div>}
     </div>
   );
 }
