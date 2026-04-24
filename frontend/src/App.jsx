@@ -36,17 +36,25 @@ export default function App() {
   const [chatTimer, setChatTimer] = useState(CHAT_BREAK_MINUTES * 60);
 
   useEffect(() => {
-    api.get("/poses")
-      .then(res => {
-        const list = res.data.poses.map(p => p.name);
-        setPoses(list);
-        const imgs = {};
-        res.data.poses.forEach(p => { if (p.ref_image) imgs[p.name] = p.ref_image; });
-        setRefImages(imgs);
-        setPosesLoaded(true);
-      })
-      .catch(err => console.error("Pose fetch failed", err));
-  }, []);
+  api.get("/poses")
+    .then(res => {
+      const list = res.data.poses.map(p => p.name);
+      setPoses(list);
+      
+      const imgs = {};
+      res.data.poses.forEach(p => { 
+        if (p.ref_image) imgs[p.name] = p.ref_image; 
+      });
+      setRefImages(imgs);
+      setPosesLoaded(true);
+
+      // FIX: If no pose is selected yet, default to the first one in the list
+      if (list.length > 0) {
+        setSelectedPose(list[0]); 
+      }
+    })
+    .catch(err => console.error("Pose fetch failed", err));
+}, []);
 
   // ── WebSocket logic ──
   useEffect(() => {
@@ -193,7 +201,8 @@ export default function App() {
 
       <Routes>
         <Route path="/" element={<WelcomeScreen posesLoaded={posesLoaded} onBegin={() => { setSelectedPose("Nomoskar"); navigate("/yoga"); }} />} />
-        <Route path="/yoga" element={<YogaPosesScreen isFirstPose={isFirstPose} selectedPose={selectedPose} refImages={refImages} score={score} holdProgress={holdProgress} feedback={feedback} serverFrame={serverFrame} session={session} scoreHistory={scoreHistory} wsReady={wsReady} onSkipToChat={() => { setIsFirstPose(false); navigate("/chat"); }} />} />
+        <Route path="/yoga" element={<YogaPosesScreen isFirstPose={isFirstPose} selectedPose={selectedPose} setSelectedPose={setSelectedPose} // Pass the state setter
+      poses={poses} refImages={refImages} score={score} holdProgress={holdProgress} feedback={feedback} serverFrame={serverFrame} session={session} scoreHistory={scoreHistory} wsReady={wsReady} onSkipToChat={() => { setIsFirstPose(false); navigate("/chat"); }} />} />
         <Route path="/chat" element={<ChatScreen session={session} scoreHistory={scoreHistory} chatTimer={chatTimer} onManualYoga={handleManualYoga} />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

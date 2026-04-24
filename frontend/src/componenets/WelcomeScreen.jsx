@@ -15,11 +15,11 @@ export default function WelcomeScreen({ onBegin, posesLoaded }) {
           <p className="welcome__card-greeting">Welcome, dear student.</p>
           <p className="welcome__card-body">
             Before we begin our conversation, let us first bring awareness to
-            the body. A clear mind begins with a present body.
+            the body. A clear mind begins with a pleasent body.
           </p>
           <p className="welcome__card-body">
             You will be guided through a short{" "}
-            <strong>Nomoskar</strong> pose. Hold it steadily at 80% accuracy
+            <strong>Yoga</strong> pose. Hold it steadily at {`>=`} 80% accuracy
             for 10 seconds to unlock the dialogue.
           </p>
         </div>
