@@ -168,3 +168,5 @@ const SokratesChat = () => {
 };
 
 export default SokratesChat;
+
+export default SokratesChat;
