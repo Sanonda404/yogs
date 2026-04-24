@@ -1,41 +1,59 @@
 import React, { useState, useEffect, useRef } from "react";
 
 const SokratesChat = () => {
-  const [velocity, setVelocity] = useState(0);
-  const [isTooFast, setIsTooFast] = useState(false);
-  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
-  const scrollTimeout = useRef(null);
+  const [isTooFast, setIsTooFast]   = useState(false);
+  const [mousePos, setMousePos]     = useState({ x: 0, y: 0 });
+
+  const velocityBuffer  = useRef([]);
+  const resetTimer      = useRef(null);
+  const cooldownTimer   = useRef(null);
+  const isLocked        = useRef(false);
+  const iframeWrapperRef = useRef(null);
+
+  const handleWheel = (e) => {
+    const now   = Date.now();
+    const delta = Math.abs(e.deltaY);
+
+    velocityBuffer.current.push({ delta, time: now });
+    velocityBuffer.current = velocityBuffer.current.filter(
+      (v) => now - v.time < 150
+    );
+
+    const burstVelocity = velocityBuffer.current.reduce(
+      (sum, v) => sum + v.delta, 0
+    );
+
+    if (burstVelocity > 600 && !isLocked.current) {
+      isLocked.current = true;
+      setIsTooFast(true);
+
+      clearTimeout(resetTimer.current);
+      clearTimeout(cooldownTimer.current);
+
+      resetTimer.current = setTimeout(() => {
+        setIsTooFast(false);
+        velocityBuffer.current = [];
+
+        cooldownTimer.current = setTimeout(() => {
+          isLocked.current = false;
+        }, 800);
+      }, 1500);
+    }
+  };
 
   useEffect(() => {
-    // Check if window exists (prevents Vercel/Next.js build errors)
     if (typeof window === "undefined") return;
-
-    const handleWheel = (e) => {
-      const currentVelocity = Math.abs(e.deltaY);
-      setVelocity(currentVelocity);
-
-      if (currentVelocity > 75) {
-        setIsTooFast(true);
-      }
-
-      clearTimeout(scrollTimeout.current);
-      scrollTimeout.current = setTimeout(() => {
-        setIsTooFast(false);
-        setVelocity(0);
-      }, 1500);
-    };
 
     const handleMouseMove = (e) => {
       setMousePos({ x: e.clientX, y: e.clientY });
     };
 
-    window.addEventListener("wheel", handleWheel, { passive: true });
     window.addEventListener("mousemove", handleMouseMove);
 
     return () => {
-      window.removeEventListener("wheel", handleWheel);
       window.removeEventListener("mousemove", handleMouseMove);
-      if (scrollTimeout.current) clearTimeout(scrollTimeout.current);
+      clearTimeout(resetTimer.current);
+      clearTimeout(cooldownTimer.current);
     };
   }, []);
 
@@ -43,16 +61,16 @@ const SokratesChat = () => {
     <div className="chat-full-container">
       {/* Warning Message */}
       <div className={`scroll-warning ${isTooFast ? "visible" : ""}`}>
-        Read genuinely and understand before hurry
+        Read genuinely and understand before you hurry.
       </div>
 
-      {/* Bubble Cursor - Dynamic Styles applied via inline 'style' for performance */}
-      <div 
+      {/* Bubble Cursor */}
+      <div
         className={`bubble-cursor ${isTooFast ? "red" : "green"}`}
-        style={{ 
-          left: mousePos.x, 
+        style={{
+          left: mousePos.x,
           top: mousePos.y,
-          transform: `translate(-50%, -50%) scale(${isTooFast ? 1.5 : 1})` 
+          transform: `translate(-50%, -50%) scale(${isTooFast ? 1.5 : 1})`,
         }}
       />
 
@@ -65,22 +83,30 @@ const SokratesChat = () => {
           </div>
         </div>
         <div className="status-indicator">
-          <span className={`dot ${isTooFast ? "danger" : ""}`}></span> 
+          <span className={`dot ${isTooFast ? "danger" : ""}`}></span>
           <span style={{ color: isTooFast ? "#ff4444" : "#8ba88e" }}>
             {isTooFast ? "Slow Down, Think" : "Sanctuary Mode"}
           </span>
         </div>
       </div>
 
-      <div className="iframe-wrapper">
+      {/* Wrapper catches scroll even inside iframe */}
+      <div
+        className="iframe-wrapper"
+        ref={iframeWrapperRef}
+        onWheel={handleWheel}  {/* ← catches scroll before iframe gets it */}
+      >
+        {/* Invisible overlay to keep capturing scroll after iframe gets focus */}
+        <div className="iframe-overlay" />
+
         <iframe
           src="https://niloy64-sokrates.hf.space/?__theme=dark"
           width="100%"
           height="100%"
           title="Sokrates AI"
-          style={{ border: 'none', backgroundColor: '#222425' }}
+          style={{ border: "none", backgroundColor: "#222425" }}
           allow="accelerometer; ambient-light-sensor; microphone; camera; clipboard-read; clipboard-write"
-        ></iframe>
+        />
       </div>
 
       <style>{`
@@ -125,7 +151,8 @@ const SokratesChat = () => {
           border-radius: 50%;
           pointer-events: none;
           z-index: 9999;
-          transition: background 0.3s ease, border 0.3s ease, width 0.3s ease, height 0.3s ease;
+          transition: background 0.3s ease, border 0.3s ease,
+                      transform 0.3s ease, box-shadow 0.3s ease;
         }
 
         .bubble-cursor.green {
@@ -161,6 +188,15 @@ const SokratesChat = () => {
           flex: 1;
           width: 100%;
           overflow: hidden;
+          position: relative;   /* needed for overlay positioning */
+        }
+
+        .iframe-overlay {
+          position: absolute;
+          inset: 0;
+          z-index: 10;
+          pointer-events: none;  /* clicks pass through to iframe */
+          /* scroll events still bubble up to onWheel on the wrapper */
         }
       `}</style>
     </div>
