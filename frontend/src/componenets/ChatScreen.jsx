@@ -16,6 +16,9 @@ export default function ChatScreen({ session, scoreHistory, chatTimer, onManualY
           <span className="sk-badge sk-badge--points">
             ✨ <strong>{session.total_points} pts</strong>
           </span>
+          <button className="yoga__btn" onClick={onManualYoga}>
+          🧘 Take a Yoga Break
+        </button>
         </div>
       </header>
 
