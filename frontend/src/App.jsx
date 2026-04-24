@@ -1,202 +1,206 @@
-import { useState, useEffect, useRef, useCallback } from "react";
-import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
-import api, { WS_URL } from "./api";
-import SokratesChat from "./componenets/SokratesChat";
-import YogaPosesScreen from "./componenets/YogaPosesScreen";
-import ChatScreen from "./componenets/ChatScreen";
-import WelcomeScreen from "./componenets/WelcomeScreen";
+import React, { useState, useEffect, useRef } from "react";
 
-const FPS                = 12;
-const HOLD_THRESHOLD     = 80;
-const REQUIRED_HOLD_TIME = 10;
-const CHAT_BREAK_MINUTES = 25;
+const SokratesChat = () => {
+  const [isTooFast, setIsTooFast]   = useState(false);
+  const [mousePos, setMousePos]     = useState({ x: 0, y: 0 });
 
-export default function App() {
-  const navigate = useNavigate();
-  const location = useLocation(); // Track the current route
+  const velocityBuffer  = useRef([]);
+  const resetTimer      = useRef(null);
+  const cooldownTimer   = useRef(null);
+  const isLocked        = useRef(false);
+  const iframeWrapperRef = useRef(null);
 
-  const videoRef    = useRef(null);
-  const canvasRef   = useRef(null);
-  const wsRef       = useRef(null);
-  const intervalRef = useRef(null);
-  const streamRef   = useRef(null);
+  const handleWheel = (e) => {
+    const now   = Date.now();
+    const delta = Math.abs(e.deltaY);
 
-  const [poses, setPoses]             = useState([]);
-  const [refImages, setRefImages]     = useState({});
-  const [posesLoaded, setPosesLoaded] = useState(false);
-  const [isFirstPose, setIsFirstPose] = useState(true);
-  const [selectedPose, setSelectedPose] = useState("Nomoskar");
-  const [score, setScore]               = useState(0);
-  const [holdProgress, setHoldProgress] = useState(0);
-  const [feedback, setFeedback]         = useState([]);
-  const [serverFrame, setServerFrame]   = useState(null);
-  const [wsReady, setWsReady]           = useState(false);
-  const [session, setSession]           = useState({ total_points: 0 });
-  const [scoreHistory, setScoreHistory] = useState([]);
-  const [chatTimer, setChatTimer] = useState(CHAT_BREAK_MINUTES * 60);
+    velocityBuffer.current.push({ delta, time: now });
+    velocityBuffer.current = velocityBuffer.current.filter(
+      (v) => now - v.time < 150
+    );
 
-  useEffect(() => {
-    api.get("/poses")
-      .then(res => {
-        const list = res.data.poses.map(p => p.name);
-        setPoses(list);
-        const imgs = {};
-        res.data.poses.forEach(p => { if (p.ref_image) imgs[p.name] = p.ref_image; });
-        setRefImages(imgs);
-        setPosesLoaded(true);
-      })
-      .catch(err => console.error("Pose fetch failed", err));
-  }, []);
+    const burstVelocity = velocityBuffer.current.reduce(
+      (sum, v) => sum + v.delta, 0
+    );
 
-  // ── WebSocket logic ──
-  useEffect(() => {
-    const ws = new WebSocket(WS_URL);
-    wsRef.current = ws;
-    ws.onopen  = () => setWsReady(true);
-    ws.onclose = () => setWsReady(false);
+    if (burstVelocity > 600 && !isLocked.current) {
+      isLocked.current = true;
+      setIsTooFast(true);
 
-    ws.onmessage = (e) => {
-      const msg = JSON.parse(e.data);
-      if (msg.type === "frame") {
-        setServerFrame(`data:image/jpeg;base64,${msg.frame}`);
-        setScore(msg.score || 0);
-        setFeedback(msg.feedback || []);
+      clearTimeout(resetTimer.current);
+      clearTimeout(cooldownTimer.current);
 
-        if (msg.score >= HOLD_THRESHOLD) {
-          setHoldProgress(prev => {
-            const next = prev + (1 / (FPS * REQUIRED_HOLD_TIME));
-            if (next >= 1) {
-              setScoreHistory(h => [...h, {
-                pose: selectedPose,
-                score: msg.score,
-                ts: new Date().toLocaleTimeString(),
-              }]);
-              setIsFirstPose(false);
-              navigate("/chat");
-              return 0;
-            }
-            return next;
-          });
-        } else {
-          setHoldProgress(0);
-        }
-      }
-      if (msg.session) setSession(msg.session);
-    };
+      resetTimer.current = setTimeout(() => {
+        setIsTooFast(false);
+        velocityBuffer.current = [];
 
-    return () => ws.close();
-  }, [selectedPose, navigate]);
-
-  // ── Updated Camera setup: Start/Stop based on Route ──
-  const startCamera = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 640, height: 480, facingMode: "user" },
-        audio: false,
-      });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.onloadedmetadata = () => videoRef.current.play();
-      }
-    } catch (err) {
-      console.error("Webcam access denied:", err);
+        cooldownTimer.current = setTimeout(() => {
+          isLocked.current = false;
+        }, 800);
+      }, 1500);
     }
-  }, []);
-
-  const stopCamera = useCallback(() => {
-    if (streamRef.current) {
-      // Loop through tracks and stop them to turn off the light
-      streamRef.current.getTracks().forEach(t => t.stop());
-      streamRef.current = null;
-    }
-    if (videoRef.current) videoRef.current.srcObject = null;
-  }, []);
-
-  useEffect(() => {
-    // Only turn on camera if the user is on the /yoga page
-    if (location.pathname === "/yoga") {
-      startCamera();
-    } else {
-      stopCamera();
-    }
-
-    return () => {
-      stopCamera();
-      clearInterval(intervalRef.current);
-    };
-  }, [location.pathname, startCamera, stopCamera]); // Monitor route changes
-
-  // ── Frame-sending loop ──
-  useEffect(() => {
-    if (!wsReady || location.pathname !== "/yoga") return;
-
-    intervalRef.current = setInterval(() => {
-      const video  = videoRef.current;
-      const canvas = canvasRef.current;
-      if (!video || !canvas || video.readyState < 2) return;
-
-      const ctx = canvas.getContext("2d");
-      canvas.width  = 480;
-      canvas.height = 360;
-      ctx.drawImage(video, 0, 0, 480, 360);
-
-      const b64 = canvas.toDataURL("image/jpeg", 0.7).split(",")[1];
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ action: "frame", frame: b64, pose: selectedPose }));
-      }
-    }, 1000 / FPS);
-
-    return () => clearInterval(intervalRef.current);
-  }, [wsReady, selectedPose, location.pathname]);
-
-  // ── Break timer ──
-  useEffect(() => {
-    if (location.pathname !== "/chat") return;
-
-    const timer = setInterval(() => {
-      setChatTimer(prev => {
-        if (prev <= 1) {
-          const others = poses.filter(p => p !== "Nomoskar");
-          const next = others.length > 0
-            ? others[Math.floor(Math.random() * others.length)]
-            : "Nomoskar";
-          setSelectedPose(next);
-          navigate("/yoga");
-          return CHAT_BREAK_MINUTES * 60;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [poses, navigate, location.pathname]);
-
-  const handleManualYoga = () => {
-    const others = poses.filter(p => p !== "Nomoskar");
-    const next = others.length > 0
-      ? others[Math.floor(Math.random() * others.length)]
-      : "Nomoskar";
-    setIsFirstPose(false);
-    setSelectedPose(next);
-    setHoldProgress(0);
-    setScore(0);
-    setFeedback([]);
-    setServerFrame(null);
-    navigate("/yoga");
   };
 
-  return (
-    <>
-      <canvas ref={canvasRef} style={{ display: "none" }} />
-      <video  ref={videoRef}  style={{ display: "none" }} muted playsInline />
+  useEffect(() => {
+    if (typeof window === "undefined") return;
 
-      <Routes>
-        <Route path="/" element={<WelcomeScreen posesLoaded={posesLoaded} onBegin={() => { setSelectedPose("Nomoskar"); navigate("/yoga"); }} />} />
-        <Route path="/yoga" element={<YogaPosesScreen isFirstPose={isFirstPose} selectedPose={selectedPose} refImages={refImages} score={score} holdProgress={holdProgress} feedback={feedback} serverFrame={serverFrame} session={session} scoreHistory={scoreHistory} wsReady={wsReady} onSkipToChat={() => { setIsFirstPose(false); navigate("/chat"); }} />} />
-        <Route path="/chat" element={<ChatScreen session={session} scoreHistory={scoreHistory} chatTimer={chatTimer} onManualYoga={handleManualYoga} />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </>
+    const handleMouseMove = (e) => {
+      setMousePos({ x: e.clientX, y: e.clientY });
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      clearTimeout(resetTimer.current);
+      clearTimeout(cooldownTimer.current);
+    };
+  }, []);
+
+  return (
+    <div className="chat-full-container">
+      {/* Warning Message */}
+      <div className={`scroll-warning ${isTooFast ? "visible" : ""}`}>
+        Read genuinely and understand before you hurry.
+      </div>
+
+      {/* Bubble Cursor */}
+      <div
+        className={`bubble-cursor ${isTooFast ? "red" : "green"}`}
+        style={{
+          left: mousePos.x,
+          top: mousePos.y,
+          transform: `translate(-50%, -50%) scale(${isTooFast ? 1.5 : 1})`,
+        }}
+      />
+
+      <div className="chat-mini-header">
+        <div className="brand-group">
+          <span className="brand-emoji">🏛️</span>
+          <div>
+            <div className="brand-name">Sokrates</div>
+            <div className="brand-sub">Philosophy AI</div>
+          </div>
+        </div>
+        <div className="status-indicator">
+          <span className={`dot ${isTooFast ? "danger" : ""}`}></span>
+          <span style={{ color: isTooFast ? "#ff4444" : "#8ba88e" }}>
+            {isTooFast ? "Slow Down, Think" : "Sanctuary Mode"}
+          </span>
+        </div>
+      </div>
+
+      {/* Wrapper catches scroll even inside iframe */}
+      <div
+        className="iframe-wrapper"
+        ref={iframeWrapperRef}
+        onWheel={handleWheel}  {/* ← catches scroll before iframe gets it */}
+      >
+        {/* Invisible overlay to keep capturing scroll after iframe gets focus */}
+        <div className="iframe-overlay" />
+
+        <iframe
+          src="https://niloy64-sokrates.hf.space/?__theme=dark"
+          width="100%"
+          height="100%"
+          title="Sokrates AI"
+          style={{ border: "none", backgroundColor: "#222425" }}
+          allow="accelerometer; ambient-light-sensor; microphone; camera; clipboard-read; clipboard-write"
+        />
+      </div>
+
+      <style>{`
+        .chat-full-container {
+          width: 100vw;
+          height: calc(100vh - 70px);
+          display: flex;
+          flex-direction: column;
+          background: #222425;
+          position: fixed;
+          top: 70px;
+          left: 0;
+          z-index: 100;
+          overflow: hidden;
+        }
+
+        .scroll-warning {
+          position: fixed;
+          right: 20px;
+          top: 50%;
+          transform: translateY(-50%) translateX(120%);
+          background: #ff4444;
+          color: white;
+          padding: 16px 24px;
+          border-radius: 12px;
+          font-family: sans-serif;
+          font-weight: 600;
+          transition: transform 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+          z-index: 1001;
+          pointer-events: none;
+          box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+
+        .scroll-warning.visible {
+          transform: translateY(-50%) translateX(0);
+        }
+
+        .bubble-cursor {
+          position: fixed;
+          width: 24px;
+          height: 24px;
+          border-radius: 50%;
+          pointer-events: none;
+          z-index: 9999;
+          transition: background 0.3s ease, border 0.3s ease,
+                      transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .bubble-cursor.green {
+          background: rgba(139, 168, 142, 0.2);
+          border: 2px solid #8ba88e;
+        }
+
+        .bubble-cursor.red {
+          background: rgba(255, 68, 68, 0.4);
+          border: 2px solid #ff4444;
+          box-shadow: 0 0 20px rgba(255, 68, 68, 0.6);
+        }
+
+        .chat-mini-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 12px 24px;
+          background: #1a1b1c;
+          border-bottom: 1px solid #333;
+        }
+
+        .brand-group { display: flex; align-items: center; gap: 12px; }
+        .brand-emoji { font-size: 24px; }
+        .brand-name { font-family: serif; color: #fdf6ee; font-weight: bold; font-size: 1.1rem; }
+        .brand-sub { font-size: 10px; color: #8ba88e; text-transform: uppercase; letter-spacing: 1px; }
+
+        .status-indicator { font-size: 12px; display: flex; align-items: center; gap: 8px; font-weight: 500; }
+        .dot { width: 8px; height: 8px; background: #8ba88e; border-radius: 50%; display: inline-block; box-shadow: 0 0 8px #8ba88e; transition: all 0.3s ease; }
+        .dot.danger { background: #ff4444; box-shadow: 0 0 12px #ff4444; transform: scale(1.4); }
+
+        .iframe-wrapper {
+          flex: 1;
+          width: 100%;
+          overflow: hidden;
+          position: relative;   /* needed for overlay positioning */
+        }
+
+        .iframe-overlay {
+          position: absolute;
+          inset: 0;
+          z-index: 10;
+          pointer-events: none;  /* clicks pass through to iframe */
+          /* scroll events still bubble up to onWheel on the wrapper */
+        }
+      `}</style>
+    </div>
   );
-}
+};
+
+export default SokratesChat;
