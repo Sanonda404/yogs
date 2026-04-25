@@ -1,6 +1,11 @@
 # 🏛️ SOKRATES — Mind · Body · Wisdom
 
 > *"Friction is not always the enemy — sometimes it is precisely what gives life its deepest flavor."*
+> 
+
+
+
+
 
 SOKRATES is an interactive learning platform that combines **physical yoga pose detection** with a **Socratic AI philosophy chatbot**. Before unlocking the dialogue, users must ground themselves in the present moment by holding a yoga pose — bridging physical awareness with intellectual exploration.
 
@@ -105,7 +110,16 @@ This is not a bug. It is the feature.
 
 ## 📸 Screenshots
 
-><img width="1872" height="965" alt="image" src="https://github.com/user-attachments/assets/34d1faa0-b59d-4361-beab-5f707e95ce53" />
+
+Front View::
+<img width="1907" height="918" alt="image" src="https://github.com/user-attachments/assets/58308d27-a339-4ca9-9cbe-b620380c6cb5" />
+
+
+The Bot::
+<img width="1282" height="881" alt="image" src="https://github.com/user-attachments/assets/b3f8432d-b625-4910-b079-839abdabfaa9" />
+
+The Yoga detector (Ml Based):
+<img width="1852" height="892" alt="image" src="https://github.com/user-attachments/assets/0281f44c-bcfc-4ab0-b2a9-d9f6803fa7b5" />
 
 ---
 
