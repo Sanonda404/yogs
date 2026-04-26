@@ -72,7 +72,7 @@ The pose classifier was built entirely in Google Colab:
 | Component | Platform | URL |
 |-----------|----------|-----|
 | Chatbot backend | Hugging Face Spaces | [niloy64-sokrates.hf.space](https://niloy64-sokrates.hf.space) |
-| Pose detector | Hugging Face Spaces | Gradio app |
+| Pose detector | Medipipe+Colab | Railway |
 | Frontend | Vercel | — |
 
 ---
